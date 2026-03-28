@@ -37,6 +37,7 @@ controller:
       alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
       alb.ingress.kubernetes.io/ssl-redirect: "443"
       alb.ingress.kubernetes.io/certificate-arn: "arn:aws:acm:eu-central-1:<account-id>:certificate/1ec6590a-0529-4af0-81e9-ec59ec71aab2"
+      alb.ingress.kubernetes.io/ssl-policy: ELBSecurityPolicy-TLS13-1-2-2021-06
       alb.ingress.kubernetes.io/healthcheck-path: /login
       alb.ingress.kubernetes.io/tags: "iit-billing-tag=jenkins-eks-poc"
     tls:
@@ -56,10 +57,41 @@ controller:
           name: ps57-2-admin
           key: password
           optional: true
+  customInitContainers:
+    - name: groovy-init
+      image: busybox
+      command:
+        - sh
+        - -c
+        - |
+          echo "Linking persistent groovy scripts..."
+          for f in /opt/groovy/persistent/*.groovy; do
+            [ -f "$f" ] && ln -sf "$f" "/var/jenkins_home/init.groovy.d/$(basename $f)"
+          done
+          if [ ! -f /var/jenkins_home/.clone-initialized ]; then
+            echo "First boot: copying one-time scripts..."
+            cp /opt/groovy/one-time/*.groovy /var/jenkins_home/init.groovy.d/ 2>/dev/null || true
+            rm -f /var/jenkins_home/init.groovy.d/matrix.groovy
+          fi
+      volumeMounts:
+        - name: jenkins-home
+          mountPath: /var/jenkins_home
+          subPath: "ps57.cd.percona.com"
+        - name: groovy-persistent
+          mountPath: /opt/groovy/persistent
+        - name: groovy-one-time
+          mountPath: /opt/groovy/one-time
 persistence:
   enabled: true
   existingClaim: ps57-2-jenkins-home
   subPath: "ps57.cd.percona.com"
+  volumes:
+    - name: groovy-persistent
+      configMap:
+        name: ps57-2-groovy-persistent
+    - name: groovy-one-time
+      configMap:
+        name: ps57-2-groovy-one-time
 serviceAccount:
   create: false
   name: jenkins

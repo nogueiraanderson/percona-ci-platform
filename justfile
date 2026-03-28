@@ -218,6 +218,7 @@ clone-instance name source_vol jenkins_home:
           alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
           alb.ingress.kubernetes.io/ssl-redirect: "443"
           alb.ingress.kubernetes.io/certificate-arn: "ACM_CERT_ARN"
+          alb.ingress.kubernetes.io/ssl-policy: ELBSecurityPolicy-TLS13-1-2-2021-06
           alb.ingress.kubernetes.io/healthcheck-path: /login
           alb.ingress.kubernetes.io/tags: "iit-billing-tag=jenkins-eks-poc"
         tls:
@@ -261,17 +262,17 @@ clone-instance name source_vol jenkins_home:
               mountPath: /opt/groovy/persistent
             - name: groovy-one-time
               mountPath: /opt/groovy/one-time
-      extraVolumes:
+    persistence:
+      enabled: true
+      existingClaim: NAME-jenkins-home
+      subPath: "JENKINS_HOME"
+      volumes:
         - name: groovy-persistent
           configMap:
             name: NAME-groovy-persistent
         - name: groovy-one-time
           configMap:
             name: NAME-groovy-one-time
-    persistence:
-      enabled: true
-      existingClaim: NAME-jenkins-home
-      subPath: "JENKINS_HOME"
     serviceAccount:
       create: false
       name: jenkins

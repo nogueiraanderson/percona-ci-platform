@@ -56,6 +56,7 @@ controller:
       alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
       alb.ingress.kubernetes.io/ssl-redirect: "443"
       alb.ingress.kubernetes.io/certificate-arn: "arn:aws:acm:eu-central-1:<account-id>:certificate/1ec6590a-0529-4af0-81e9-ec59ec71aab2"
+      alb.ingress.kubernetes.io/ssl-policy: ELBSecurityPolicy-TLS13-1-2-2021-06
       alb.ingress.kubernetes.io/healthcheck-path: /login
       alb.ingress.kubernetes.io/tags: "iit-billing-tag=jenkins-eks-poc"
     tls:
