@@ -51,6 +51,7 @@ controller:
     ingressClassName: alb
     hostName: ps57-k8s.cd.percona.com
     annotations:
+      alb.ingress.kubernetes.io/group.name: jenkins-shared
       alb.ingress.kubernetes.io/scheme: internet-facing
       alb.ingress.kubernetes.io/target-type: ip
       alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'

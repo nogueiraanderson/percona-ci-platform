@@ -213,6 +213,7 @@ clone-instance name source_vol jenkins_home:
         ingressClassName: alb
         hostName: DOMAIN
         annotations:
+          alb.ingress.kubernetes.io/group.name: jenkins-shared
           alb.ingress.kubernetes.io/scheme: internet-facing
           alb.ingress.kubernetes.io/target-type: ip
           alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
@@ -370,7 +371,10 @@ dns name:
     #!/usr/bin/env bash
     set -euo pipefail
     DOMAIN="{{name}}.{{dns_suffix}}"
+    # Try <name>-jenkins first (standard Helm naming), fall back to <name>
     ALB_HOST=$(kubectl -n jenkins get ingress {{name}}-jenkins \
+        -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || \
+        kubectl -n jenkins get ingress {{name}} \
         -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
     echo "ALB: $ALB_HOST"
     aws route53 change-resource-record-sets --profile {{profile}} \
