@@ -1,31 +1,19 @@
-// Configure EC2 clouds to use IRSA credentials on EKS.
+// Switch EC2 clouds from InstanceProfileCredentialsProvider to
+// DefaultCredentialsProvider so the patched EC2 plugin (with STS
+// dependency) picks up IRSA on EKS pods.
 //
-// KNOWN ISSUE: The EC2 plugin's AWSCredentialsImpl does not support
-// empty access keys (throws NullPointerException on startup).
-// The plugin uses InstanceProfileCredentialsProvider when
-// useInstanceProfileForCredentials=true, which resolves to the
-// EKS node IAM role (not the pod's IRSA role).
+// Runs AFTER cloud.groovy (alphabetical: 'e' > 'c') to override
+// the hardcoded useInstanceProfileForCredentials=true.
 //
-// WORKAROUND OPTIONS:
-//   1. Attach the jenkins EC2 policy to the EKS node instance role
-//   2. Create a Jenkins credential with actual IAM access key/secret
-//      (less ideal, but works with the current plugin)
-//   3. Wait for EC2 plugin to support DefaultCredentialsProvider
-//      which would pick up IRSA automatically
-//
-// This script is a placeholder. Uncomment and adapt when a solution
-// is chosen.
-//
-// import hudson.plugins.ec2.*
-// Jenkins.instance.clouds.findAll { it.class.simpleName == "EC2Cloud" }.each { cloud ->
-//   def fieldCred = EC2Cloud.getDeclaredField("credentialsId")
-//   fieldCred.accessible = true
-//   fieldCred.set(cloud, "your-credential-id")
-//   println "${cloud.name}: credentialsId set"
-// }
-// Jenkins.instance.save()
+// Requires: ec2 plugin >= 5.24.percona.3 (fix/eks-irsa-support branch)
+// which adds STS dependency and tryCreateWebIdentityProvider().
+import jenkins.model.Jenkins
+import hudson.plugins.ec2.EC2Cloud
 
-println "EC2 IRSA credential: not applied (see script comments for options)"
-
-// Self-delete
-new File("/var/jenkins_home/init.groovy.d/ec2-irsa-credential.groovy").delete()
+Jenkins.instance.clouds.findAll { it instanceof EC2Cloud }.each { cloud ->
+  def field = EC2Cloud.getDeclaredField("useInstanceProfileForCredentials")
+  field.accessible = true
+  field.set(cloud, false)
+  println "EC2 IRSA: ${cloud.name} -> useInstanceProfile=false"
+}
+Jenkins.instance.save()
