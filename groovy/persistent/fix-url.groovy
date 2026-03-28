@@ -1,5 +1,5 @@
-// Set Jenkins URL from JENKINS_URL env var.
-// Falls back to existing URL if env var is not set.
+// Persistent: runs every startup.
+// Sets Jenkins URL from JENKINS_URL env var.
 import jenkins.model.*
 
 def newUrl = System.getenv("JENKINS_URL")
@@ -12,6 +12,3 @@ if (newUrl) {
 } else {
   println "JENKINS_URL env var not set, keeping existing URL"
 }
-
-// Self-delete
-new File("/var/jenkins_home/init.groovy.d/fix-url.groovy").delete()

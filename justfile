@@ -174,12 +174,12 @@ clone-instance name source_vol jenkins_home:
     EOF
     # Generate Helm values
     DOMAIN="{{name}}.cd.percona.com"
-    cat > instances/{{name}}-values.yaml << EOF
+    cat > instances/{{name}}-values.yaml << 'VALUESEOF'
     controller:
       image:
-        registry: "{{registry}}"
-        repository: {{repo}}
-        tag: "{{tag}}"
+        registry: "REGISTRY"
+        repository: REPO
+        tag: "TAG"
         pullPolicy: IfNotPresent
       installPlugins: false
       overwritePluginsFromImage: false
@@ -207,18 +207,18 @@ clone-instance name source_vol jenkins_home:
       ingress:
         enabled: true
         ingressClassName: alb
-        hostName: $DOMAIN
+        hostName: DOMAIN
         annotations:
           alb.ingress.kubernetes.io/scheme: internet-facing
           alb.ingress.kubernetes.io/target-type: ip
           alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
           alb.ingress.kubernetes.io/ssl-redirect: "443"
-          alb.ingress.kubernetes.io/certificate-arn: "{{acm_cert_arn}}"
+          alb.ingress.kubernetes.io/certificate-arn: "ACM_CERT_ARN"
           alb.ingress.kubernetes.io/healthcheck-path: /login
           alb.ingress.kubernetes.io/tags: "iit-billing-tag=jenkins-eks-poc"
         tls:
           - hosts:
-              - $DOMAIN
+              - DOMAIN
       JCasC:
         defaultConfig: false
         overwriteConfiguration: false
@@ -226,73 +226,105 @@ clone-instance name source_vol jenkins_home:
         iit-billing-tag: jenkins-eks-poc
       containerEnv:
         - name: JENKINS_URL
-          value: "https://$DOMAIN/"
+          value: "https://DOMAIN/"
         - name: JENKINS_ADMIN_PASSWORD
           valueFrom:
             secretKeyRef:
-              name: {{name}}-admin
+              name: NAME-admin
               key: password
               optional: true
+      customInitContainers:
+        - name: groovy-init
+          image: busybox
+          command:
+            - sh
+            - -c
+            - |
+              echo "Linking persistent groovy scripts..."
+              for f in /opt/groovy/persistent/*.groovy; do
+                [ -f "$f" ] && ln -sf "$f" "/var/jenkins_home/init.groovy.d/$(basename $f)"
+              done
+              if [ ! -f /var/jenkins_home/.clone-initialized ]; then
+                echo "First boot: copying one-time scripts..."
+                cp /opt/groovy/one-time/*.groovy /var/jenkins_home/init.groovy.d/ 2>/dev/null || true
+                rm -f /var/jenkins_home/init.groovy.d/matrix.groovy
+              fi
+          volumeMounts:
+            - name: jenkins-home
+              mountPath: /var/jenkins_home
+              subPath: "JENKINS_HOME"
+            - name: groovy-persistent
+              mountPath: /opt/groovy/persistent
+            - name: groovy-one-time
+              mountPath: /opt/groovy/one-time
+      extraVolumes:
+        - name: groovy-persistent
+          configMap:
+            name: NAME-groovy-persistent
+        - name: groovy-one-time
+          configMap:
+            name: NAME-groovy-one-time
     persistence:
       enabled: true
-      existingClaim: {{name}}-jenkins-home
-      subPath: "{{jenkins_home}}"
+      existingClaim: NAME-jenkins-home
+      subPath: "JENKINS_HOME"
     serviceAccount:
       create: false
       name: jenkins
     agent:
       enabled: false
-    EOF
+    VALUESEOF
+    # Replace placeholders
+    sed -i "s|REGISTRY|{{registry}}|g; s|REPO|{{repo}}|g; s|TAG|{{tag}}|g" instances/{{name}}-values.yaml
+    sed -i "s|DOMAIN|$DOMAIN|g; s|ACM_CERT_ARN|{{acm_cert_arn}}|g" instances/{{name}}-values.yaml
+    sed -i "s|NAME|{{name}}|g; s|JENKINS_HOME|{{jenkins_home}}|g" instances/{{name}}-values.yaml
     echo "Generated: instances/{{name}}-pv.yaml, instances/{{name}}-values.yaml"
-    echo "Next: just deploy-instance name={{name}}"
+    echo "Next: just deploy-instance {{name}}"
 
 # Deploy a Jenkins instance (after clone-instance)
-# Usage: just deploy-instance name=ps57-2
+# Usage: just deploy-instance ps57-2       (POC mode, default)
+#        just deploy-instance ps57-2 prod  (keep existing auth)
 deploy-instance name mode="poc":
     #!/usr/bin/env bash
     set -euo pipefail
     echo "=== Deploying {{name}} (mode={{mode}}) ==="
-    # Apply PV/PVC
-    kubectl apply -f instances/{{name}}-pv.yaml
-    # Create admin password secret (POC mode)
+    DOMAIN="{{name}}.cd.percona.com"
+    # 1. Create ConfigMaps from groovy scripts
+    echo "Creating ConfigMaps..."
+    kubectl -n jenkins create configmap {{name}}-groovy-persistent \
+        --from-file=groovy/persistent/ \
+        --dry-run=client -o yaml | kubectl apply -f -
+    if [ "{{mode}}" = "poc" ]; then
+      kubectl -n jenkins create configmap {{name}}-groovy-one-time \
+          --from-file=groovy/one-time/ \
+          --dry-run=client -o yaml | kubectl apply -f -
+    else
+      # Prod: only disable-crons (no auth change)
+      kubectl -n jenkins create configmap {{name}}-groovy-one-time \
+          --from-file=groovy/one-time/disable-crons.groovy \
+          --dry-run=client -o yaml | kubectl apply -f -
+    fi
+    # 2. Create admin password secret (POC mode)
     if [ "{{mode}}" = "poc" ]; then
       PASS=$(openssl rand -base64 12)
       kubectl -n jenkins create secret generic {{name}}-admin \
-        --from-literal=password="$PASS" --dry-run=client -o yaml | kubectl apply -f -
+          --from-literal=password="$PASS" --dry-run=client -o yaml | kubectl apply -f -
       echo "Admin password: $PASS"
     fi
-    # Deploy via Helm
+    # 3. Apply PV/PVC
+    kubectl apply -f instances/{{name}}-pv.yaml
+    # 4. Deploy via Helm
     helm repo add jenkinsci https://charts.jenkins.io 2>/dev/null || true
     helm install {{name}} jenkinsci/jenkins \
         -f instances/{{name}}-values.yaml \
         -n jenkins
     echo "Waiting for pod..."
+    kubectl -n jenkins wait --for=condition=ready pod -l app.kubernetes.io/instance={{name}} --timeout=600s || true
+    # 5. DNS
     sleep 10
-    kubectl -n jenkins wait --for=condition=ready pod -l app.kubernetes.io/instance={{name}} --timeout=300s || true
-    # Configure (POC: local auth + disable crons; prod: keep existing auth)
-    POD=$(kubectl -n jenkins get pods -l app.kubernetes.io/instance={{name}} -o jsonpath='{.items[0].metadata.name}')
-    if [ "{{mode}}" = "poc" ]; then
-      kubectl -n jenkins exec "$POD" -c jenkins -- rm -f /var/jenkins_home/init.groovy.d/matrix.groovy
-      for f in groovy/*.groovy; do
-        kubectl cp "$f" "jenkins/$POD:/var/jenkins_home/init.groovy.d/$(basename $f)" -c jenkins
-      done
-      echo "Restarting with init scripts..."
-      kubectl -n jenkins delete pod "$POD"
-      kubectl -n jenkins wait --for=condition=ready pod -l app.kubernetes.io/instance={{name}} --timeout=300s
-    else
-      # Prod: only apply URL fix and IRSA credential, keep existing auth
-      kubectl cp groovy/fix-url.groovy "jenkins/$POD:/var/jenkins_home/init.groovy.d/" -c jenkins
-      kubectl cp groovy/ec2-irsa-credential.groovy "jenkins/$POD:/var/jenkins_home/init.groovy.d/" -c jenkins
-      kubectl cp groovy/disable-crons.groovy "jenkins/$POD:/var/jenkins_home/init.groovy.d/" -c jenkins
-      echo "Restarting with URL fix + IRSA + cron disable..."
-      kubectl -n jenkins delete pod "$POD"
-      kubectl -n jenkins wait --for=condition=ready pod -l app.kubernetes.io/instance={{name}} --timeout=300s
-    fi
-    # DNS
-    DOMAIN="{{name}}.cd.percona.com"
-    ALB_HOST=$(kubectl -n jenkins get ingress {{name}} \
-        -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "pending")
-    if [ "$ALB_HOST" != "pending" ] && [ -n "$ALB_HOST" ]; then
+    ALB_HOST=$(kubectl -n jenkins get ingress {{name}}-jenkins \
+        -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+    if [ -n "$ALB_HOST" ]; then
       aws route53 change-resource-record-sets --profile {{profile}} \
           --hosted-zone-id {{hosted_zone_id}} \
           --change-batch "{
@@ -301,10 +333,32 @@ deploy-instance name mode="poc":
                   \"ResourceRecords\":[{\"Value\":\"$ALB_HOST\"}]}}]}"
       echo "DNS: $DOMAIN -> $ALB_HOST"
     else
-      echo "ALB not ready yet. Run: just dns name={{name}}"
+      echo "ALB not ready yet. Run: just dns {{name}}"
     fi
     echo "=== {{name}} deployed ==="
     echo "URL: https://$DOMAIN"
+
+# Update ConfigMaps for an existing instance (then restart pod to pick up changes)
+update-groovy name mode="poc":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "Updating ConfigMaps for {{name}}..."
+    kubectl -n jenkins create configmap {{name}}-groovy-persistent \
+        --from-file=groovy/persistent/ \
+        --dry-run=client -o yaml | kubectl apply -f -
+    if [ "{{mode}}" = "poc" ]; then
+      kubectl -n jenkins create configmap {{name}}-groovy-one-time \
+          --from-file=groovy/one-time/ \
+          --dry-run=client -o yaml | kubectl apply -f -
+    else
+      kubectl -n jenkins create configmap {{name}}-groovy-one-time \
+          --from-file=groovy/one-time/disable-crons.groovy \
+          --dry-run=client -o yaml | kubectl apply -f -
+    fi
+    echo "Restarting pod..."
+    kubectl -n jenkins delete pod -l app.kubernetes.io/instance={{name}}
+    kubectl -n jenkins wait --for=condition=ready pod -l app.kubernetes.io/instance={{name}} --timeout=300s
+    echo "Done"
 
 # Create DNS record for an instance
 dns name:

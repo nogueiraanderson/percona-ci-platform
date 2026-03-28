@@ -28,5 +28,8 @@ try {
 
 println "Auth: local DB, no anonymous access"
 
+// Mark clone as initialized (prevents one-time scripts from re-running)
+new File("/var/jenkins_home/.clone-initialized").text = new Date().toString()
+
 // Self-delete
 new File("/var/jenkins_home/init.groovy.d/fix-auth.groovy").delete()
