@@ -1,0 +1,2 @@
+# Don't commit plugin binaries
+percona-plugins/*.hpi

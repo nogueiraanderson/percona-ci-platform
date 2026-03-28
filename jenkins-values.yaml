@@ -1,0 +1,86 @@
+# Jenkins Helm values for ps57-k8s.cd.percona.com POC on EKS
+# Chart: jenkinsci/jenkins
+#
+# Lift-and-shift of the ps57 Jenkins master to EKS (eu-central-1).
+# Workers (EC2 + Hetzner) are unchanged; only the master runs on EKS.
+# TLS via ALB Ingress Controller + ACM certificate.
+# Jenkins version: 2.528.3 (same as current fleet).
+
+controller:
+  image:
+    registry: "<account-id>.dkr.ecr.eu-central-1.amazonaws.com"
+    repository: jenkins-percona
+    tag: "2.528.3-ps57"
+    pullPolicy: IfNotPresent
+
+  # Plugins are baked into the Docker image, not downloaded at startup
+  installPlugins: false
+  overwritePluginsFromImage: false
+  initializeOnce: true
+
+  javaOpts: >-
+    -Xms3072m -Xmx4096m -Xss4m -server
+    -Djava.awt.headless=true
+    -Dorg.jenkinsci.plugins.durabletask.BourneShellScript.HEARTBEAT_CHECK_INTERVAL=600
+
+  resources:
+    requests:
+      cpu: "1000m"
+      memory: "4Gi"
+    limits:
+      cpu: "4000m"
+      memory: "6Gi"
+
+  serviceType: ClusterIP
+
+  # JNLP agent port: EC2 and Hetzner workers connect here
+  agentListenerPort: 50000
+  agentListenerServiceType: LoadBalancer
+  agentListenerServiceAnnotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: nlb
+    service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
+    service.beta.kubernetes.io/aws-load-balancer-additional-resource-tags: "iit-billing-tag=jenkins-eks-poc"
+
+  # Master runs in EXCLUSIVE mode with 1 executor (matches current setup)
+  numExecutors: 1
+  executorMode: "EXCLUSIVE"
+
+  # ALB Ingress with ACM TLS
+  ingress:
+    enabled: true
+    ingressClassName: alb
+    hostName: ps57-k8s.cd.percona.com
+    annotations:
+      alb.ingress.kubernetes.io/scheme: internet-facing
+      alb.ingress.kubernetes.io/target-type: ip
+      alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
+      alb.ingress.kubernetes.io/ssl-redirect: "443"
+      alb.ingress.kubernetes.io/certificate-arn: "arn:aws:acm:eu-central-1:<account-id>:certificate/1ec6590a-0529-4af0-81e9-ec59ec71aab2"
+      alb.ingress.kubernetes.io/healthcheck-path: /login
+      alb.ingress.kubernetes.io/tags: "iit-billing-tag=jenkins-eks-poc"
+    tls:
+      - hosts:
+          - ps57-k8s.cd.percona.com
+
+  # JCasC: disabled. The PVC (JENKINS_HOME) is the source of truth.
+  # Manual UI changes (secrets, job configs, plugins) persist on the PVC.
+  JCasC:
+    defaultConfig: false
+    overwriteConfiguration: false
+
+  # Pod labels for cost allocation
+  podLabels:
+    iit-billing-tag: jenkins-eks-poc
+
+persistence:
+  enabled: true
+  existingClaim: ps57-jenkins-home
+  subPath: "ps57.cd.percona.com"
+
+serviceAccount:
+  create: false
+  name: jenkins
+
+# No Kubernetes pod agents; workers are EC2/Hetzner
+agent:
+  enabled: false

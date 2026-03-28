@@ -1,0 +1,46 @@
+# PersistentVolume and PersistentVolumeClaim for migrating ps57 data from
+# the existing EBS volume. Use this for Option B (faithful lift-and-shift).
+#
+# Steps:
+#   1. Run `just snapshot-volume` to create snapshot + volume
+#   2. Replace vol-XXXXXXXXX below with the new volume ID
+#   3. kubectl apply -f ps57-pv.yaml
+#   4. Set persistence.existingClaim=ps57-jenkins-home in jenkins-values.yaml
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: ps57-jenkins-home
+  labels:
+    iit-billing-tag: jenkins-eks-poc
+spec:
+  capacity:
+    storage: 100Gi
+  accessModes:
+    - ReadWriteOnce
+  csi:
+    driver: ebs.csi.aws.com
+    volumeHandle: vol-001ca1379c4dd3b76
+    fsType: xfs
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: topology.kubernetes.io/zone
+              operator: In
+              values:
+                - eu-central-1b
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ps57-jenkins-home
+  namespace: jenkins
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: ""
+  resources:
+    requests:
+      storage: 100Gi
+  volumeName: ps57-jenkins-home
