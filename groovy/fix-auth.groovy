@@ -1,4 +1,6 @@
-// Switch to Jenkins own user database with no anonymous access
+// Switch to Jenkins own user database with no anonymous access.
+// Password is read from JENKINS_ADMIN_PASSWORD env var or defaults to
+// a random UUID (printed to logs on first boot).
 import jenkins.model.*
 import hudson.security.*
 
@@ -14,11 +16,12 @@ jenkins.authorizationStrategy = strategy
 
 jenkins.save()
 
-// Create admin user
+// Create admin user with password from env or random
+def password = System.getenv("JENKINS_ADMIN_PASSWORD") ?: UUID.randomUUID().toString()
 def realm = jenkins.securityRealm
 try {
-  realm.createAccount("admin", "percona-eks-poc-2026")
-  println "Admin user created"
+  realm.createAccount("admin", password)
+  println "Admin user created. Password: ${password}"
 } catch (e) {
   println "Admin user already exists"
 }

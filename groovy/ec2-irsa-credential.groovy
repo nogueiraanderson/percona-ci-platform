@@ -5,8 +5,8 @@
 // Runs AFTER cloud.groovy (alphabetical: 'e' > 'c') to override
 // the hardcoded useInstanceProfileForCredentials=true.
 //
-// Requires: ec2 plugin >= 5.24.percona.3 (fix/eks-irsa-support branch)
-// which adds STS dependency and tryCreateWebIdentityProvider().
+// Requires: ec2 plugin with fix/eks-irsa-support patches
+// (STS dependency + tryCreateWebIdentityProvider).
 import jenkins.model.Jenkins
 import hudson.plugins.ec2.EC2Cloud
 
@@ -17,3 +17,6 @@ Jenkins.instance.clouds.findAll { it instanceof EC2Cloud }.each { cloud ->
   println "EC2 IRSA: ${cloud.name} -> useInstanceProfile=false"
 }
 Jenkins.instance.save()
+
+// Self-delete
+new File("/var/jenkins_home/init.groovy.d/ec2-irsa-credential.groovy").delete()

@@ -1,15 +1,15 @@
 // Remove all TimerTrigger (cron) from jobs to prevent
 // the cloned instance from running builds that conflict
-// with the original ps57
-import hudson.triggers.*
+// with the original instance.
+import jenkins.model.Jenkins
+import hudson.triggers.TimerTrigger
 
 def disabled = []
 Jenkins.instance.getAllItems(Job).each { job ->
-  job.triggers.each { key, trigger ->
-    if (trigger instanceof TimerTrigger) {
-      disabled << "${job.fullName}: ${trigger.spec}"
-      job.removeTrigger(trigger.descriptor)
-    }
+  def toRemove = job.triggers.findAll { k, v -> v instanceof TimerTrigger }
+  toRemove.each { key, trigger ->
+    disabled << "${job.fullName}: ${trigger.spec}"
+    job.removeTrigger(trigger.descriptor)
   }
 }
 if (disabled) {
