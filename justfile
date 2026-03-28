@@ -1,12 +1,14 @@
 # Jenkins on EKS - Build, Deploy, and Manage
 #
 # Cluster-level recipes (run once):
-#   just cluster        just iam        just alb-controller
+#   just cluster-setup
 #
 # Instance-level recipes (run per Jenkins instance):
-#   just clone-instance name=ps57-2 source_vol=vol-xxx jenkins_home=ps57.cd.percona.com
-#   just deploy-instance name=ps57-2
-#   just delete-instance name=ps57-2
+#   just clone-instance <name> <source_vol_id> <jenkins_home_subpath>
+#   just deploy-instance <name> [poc|prod]
+#   just update-groovy <name> [poc|prod]
+#   just delete-instance <name>
+#   just dns <name>
 
 # --- Global config ---
 account_id := "<account-id>"
@@ -20,7 +22,9 @@ profile := "percona-dev-admin"
 cluster_name := "jenkins-eks-poc"
 hosted_zone_id := "Z1H0AFAU7N8IMC"
 acm_cert_arn := "arn:aws:acm:eu-central-1:<account-id>:certificate/1ec6590a-0529-4af0-81e9-ec59ec71aab2"
-iam_policy_arn := "arn:aws:iam::<account-id>:policy/jenkins-ps57-eks"
+iam_policy_name := "jenkins-eks-poc"
+iam_policy_arn := "arn:aws:iam::" + account_id + ":policy/" + iam_policy_name
+dns_suffix := "cd.percona.com"
 
 # Show available recipes
 default:
@@ -64,7 +68,7 @@ cluster:
 # Create IRSA service account for Jenkins pods
 iam:
     aws iam create-policy --profile {{profile}} \
-        --policy-name jenkins-ps57-eks \
+        --policy-name {{iam_policy_name}} \
         --policy-document file://iam-policy.json \
         --tags Key=iit-billing-tag,Value=jenkins-eks-poc || true
     eksctl create iamserviceaccount \
@@ -112,8 +116,8 @@ cluster-setup: cluster iam alb-controller storage
 # Instance lifecycle (per Jenkins instance)
 # ============================================================
 
-# Clone an EBS volume for a new instance
-# Usage: just clone-instance name=ps57-2 source_vol=vol-07070c2c983c2cc5f jenkins_home=ps57.cd.percona.com
+# Clone an EBS volume and generate instance manifests
+# Example: just clone-instance ps57-2 vol-07070c2c983c2cc5f ps57.cd.percona.com
 clone-instance name source_vol jenkins_home:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -173,7 +177,7 @@ clone-instance name source_vol jenkins_home:
       volumeName: {{name}}-jenkins-home
     EOF
     # Generate Helm values
-    DOMAIN="{{name}}.cd.percona.com"
+    DOMAIN="{{name}}.{{dns_suffix}}"
     cat > instances/{{name}}-values.yaml << 'VALUESEOF'
     controller:
       image:
@@ -276,7 +280,7 @@ clone-instance name source_vol jenkins_home:
     VALUESEOF
     # Replace placeholders
     sed -i "s|REGISTRY|{{registry}}|g; s|REPO|{{repo}}|g; s|TAG|{{tag}}|g" instances/{{name}}-values.yaml
-    sed -i "s|DOMAIN|$DOMAIN|g; s|ACM_CERT_ARN|{{acm_cert_arn}}|g" instances/{{name}}-values.yaml
+    sed -i "s|DOMAIN|$DOMAIN|g; s|ACM_CERT_ARN|{{acm_cert_arn}}|g; s|DNS_SUFFIX|{{dns_suffix}}|g" instances/{{name}}-values.yaml
     sed -i "s|NAME|{{name}}|g; s|JENKINS_HOME|{{jenkins_home}}|g" instances/{{name}}-values.yaml
     echo "Generated: instances/{{name}}-pv.yaml, instances/{{name}}-values.yaml"
     echo "Next: just deploy-instance {{name}}"
@@ -288,7 +292,7 @@ deploy-instance name mode="poc":
     #!/usr/bin/env bash
     set -euo pipefail
     echo "=== Deploying {{name}} (mode={{mode}}) ==="
-    DOMAIN="{{name}}.cd.percona.com"
+    DOMAIN="{{name}}.{{dns_suffix}}"
     # 1. Create ConfigMaps from groovy scripts
     echo "Creating ConfigMaps..."
     kubectl -n jenkins create configmap {{name}}-groovy-persistent \
@@ -364,8 +368,8 @@ update-groovy name mode="poc":
 dns name:
     #!/usr/bin/env bash
     set -euo pipefail
-    DOMAIN="{{name}}.cd.percona.com"
-    ALB_HOST=$(kubectl -n jenkins get ingress {{name}} \
+    DOMAIN="{{name}}.{{dns_suffix}}"
+    ALB_HOST=$(kubectl -n jenkins get ingress {{name}}-jenkins \
         -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
     echo "ALB: $ALB_HOST"
     aws route53 change-resource-record-sets --profile {{profile}} \
@@ -379,7 +383,8 @@ dns name:
 # Delete a Jenkins instance (keeps PVC for safety)
 delete-instance name:
     helm uninstall {{name}} -n jenkins || true
-    kubectl -n jenkins delete ingress {{name}} 2>/dev/null || true
+    kubectl -n jenkins delete configmap {{name}}-groovy-persistent {{name}}-groovy-one-time 2>/dev/null || true
+    kubectl -n jenkins delete secret {{name}}-admin 2>/dev/null || true
     echo "PVC {{name}}-jenkins-home preserved (delete manually if needed)"
 
 # ============================================================

@@ -1,10 +1,6 @@
-# Jenkins on EKS POC
+# Jenkins on EKS
 
-Proof of concept: run Jenkins masters on EKS instead of bare EC2 spot instances.
-
-## What this is
-
-A lift-and-shift of the ps57 Jenkins instance to a single-node EKS cluster in eu-central-1. The existing EC2 and Hetzner worker fleets are unchanged; only the master moves to Kubernetes.
+Run Jenkins masters on EKS. Workers (EC2 + Hetzner) stay as-is.
 
 ## Architecture
 
@@ -14,123 +10,137 @@ A lift-and-shift of the ps57 Jenkins instance to a single-node EKS cluster in eu
                    [ ALB Ingress ]
                     :443 (ACM TLS)
                          |
-               [ Jenkins Pod 2.528.3 ]
-                         |
-                [ EBS PVC 100GB gp3 ]
-                  (cloned from ps57)
+        +----------------+----------------+
+        |                                 |
+[ Jenkins Pod A ]                [ Jenkins Pod B ]
+   (ps57-k8s)                      (ps57-2)
+        |                                 |
+[ EBS PVC 100GB ]                [ EBS PVC 100GB ]
+  (cloned volume)                  (cloned volume)
+        |                                 |
+        +----------------+----------------+
                          |
            +-------------+-------------+
            |                           |
    [ EC2 workers ]           [ Hetzner workers ]
-   eu-central-1b/c           nbg1/hel1/fsn1
+   (VPC peered)              nbg1/hel1/fsn1
 ```
 
-## What's different from the EC2 setup
+Multiple Jenkins instances share one EKS cluster. Each has its own Helm
+release, PVC, ALB ingress, and DNS record.
 
-| Aspect | EC2 (current) | EKS (this POC) |
-|--------|---------------|-----------------|
-| TLS | OpenResty + certbot (per-instance) | ALB + ACM wildcard cert |
-| Startup time | ~10 min (cloud-init + chown 100GB) | ~90s (pod start + plugin load) |
-| Jenkins version | Hardcoded in CF UserData | Baked into Docker image |
-| Plugins | Unmanaged (whatever is on EBS) | Pinned in plugins.txt + Dockerfile |
-| Config changes | Survive (EBS volume) | Survive (EBS PVC, same model) |
-| Workers | EC2 + Hetzner plugins | Same (unchanged) |
-| Reverse proxy | OpenResty on the instance | ALB (managed by AWS) |
+## How groovy scripts work
+
+Scripts are delivered via ConfigMaps, not kubectl cp.
+
+| Category | Scripts | Lifecycle |
+|----------|---------|-----------|
+| Persistent | ec2-irsa-credential, fix-connection-strategy, fix-url | ConfigMap -> symlinked by initContainer -> runs every startup |
+| One-time | fix-auth (POC), disable-crons | ConfigMap -> copied on first boot -> self-deletes |
+
+The initContainer runs before Jenkins and:
+1. Symlinks persistent scripts from ConfigMap into `init.groovy.d/`
+2. Copies one-time scripts only if `.clone-initialized` flag is absent
+3. Removes `matrix.groovy` on first boot (conflicts with POC auth)
 
 ## Prerequisites
 
-- AWS CLI with `percona-dev-admin` profile configured
-- `eksctl`, `kubectl`, `helm`, `just`, `docker` installed
-- Access to the `<account-id>` AWS account
+- AWS CLI with SSO profile configured
+- `eksctl`, `kubectl`, `helm`, `just`, `docker`
 
-## Quick start
-
-```bash
-# Full setup (builds image, creates cluster, deploys everything)
-just all
-
-# Or step by step:
-just ecr-create      # Create ECR repo
-just build           # Build Docker image
-just push            # Push to ECR
-just cluster         # Create EKS cluster (~15 min)
-just iam             # Create IRSA service account
-just acm             # Request and validate ACM certificate
-just alb-controller  # Install AWS Load Balancer Controller
-just deploy          # Deploy Jenkins via Helm
-just dns             # Create Route53 CNAME
-just configure       # Apply groovy init scripts and restart
-```
-
-## Data migration
-
-The POC clones the live ps57 EBS volume via snapshot:
+## Cluster setup (one-time)
 
 ```bash
-just snapshot-volume  # Snapshot vol, create new vol in eu-central-1b
-# Edit ps57-pv.yaml with the output volume ID
-kubectl apply -f ps57-pv.yaml
-# Then deploy with persistence.existingClaim=ps57-jenkins-home
+just image            # Build + push Docker image to ECR
+just cluster-setup    # EKS cluster + IRSA + ALB controller + StorageClass
 ```
 
-## Groovy init scripts
+## Adding a Jenkins instance
 
-Scripts in `groovy/` are copied to `init.groovy.d/` on the Jenkins PVC. They run once on startup and self-delete.
+```bash
+# 1. Clone the source Jenkins EBS volume
+just clone-instance <name> <source_volume_id> <jenkins_home_subpath>
+# Example:
+just clone-instance ps57-3 vol-07070c2c983c2cc5f ps57.cd.percona.com
 
-| Script | Purpose |
-|--------|---------|
-| `fix-auth.groovy` | Switch to local Jenkins auth, disable anonymous access |
-| `fix-url.groovy` | Set Jenkins URL to `ps57-k8s.cd.percona.com` |
-| `disable-crons.groovy` | Remove all cron triggers (prevent conflicts with live ps57) |
-| `ec2-irsa-credential.groovy` | Placeholder for EC2 IRSA credential setup (see known issues) |
+# 2. Deploy (creates ConfigMaps, PV/PVC, Helm release, DNS)
+just deploy-instance <name> [poc|prod]
+# Example:
+just deploy-instance ps57-3 poc
+```
 
-## Access
+POC mode: local Jenkins auth (random password printed), disable crons.
+Prod mode: keeps existing auth (Google/GitHub OAuth), only disables crons.
 
-- URL: `https://ps57-k8s.cd.percona.com`
-- Auth: `admin` / `percona-eks-poc-2026` (local Jenkins auth)
-- Jenkins CLI: `JENKINS_INSTANCE=ps57-k8s jenkins admin system`
+## Updating groovy scripts
 
-## Known issues
+Edit scripts in `groovy/persistent/` or `groovy/one-time/`, then:
 
-**EC2 worker provisioning**: The EC2 plugin uses `InstanceProfileCredentialsProvider` which resolves to the EKS node IAM role, not the pod's IRSA role. The plugin's `AWSCredentialsImpl` does not support empty access keys (NPE on startup). Workaround options:
+```bash
+just update-groovy <name>    # Updates ConfigMaps and restarts pod
+```
 
-1. Attach the `jenkins-ps57-eks` policy to the EKS node instance role (quick but coarse)
-2. Create a Jenkins credential with actual IAM access key/secret
-3. Upstream fix: EC2 plugin to support `DefaultCredentialsProvider` (picks up IRSA)
+Persistent scripts re-run on every startup. One-time scripts only run if
+`.clone-initialized` flag is absent (first boot).
 
-**Hetzner workers**: fully functional, tested and verified.
+## Other operations
 
-## Costs
+```bash
+just status                  # Show all pods, PVCs, ingresses
+just dns <name>              # Create/update DNS record
+just port-forward <name>     # Forward localhost:8080 to instance
+just delete-instance <name>  # Helm uninstall + cleanup (keeps PVC)
+just clean                   # Delete entire EKS cluster
+```
+
+## EC2 plugin IRSA support
+
+The stock EC2 plugin uses IMDS (node role) for AWS credentials. On EKS, we
+need IRSA (pod role). This requires:
+
+1. Patched EC2 plugin (`fix/eks-irsa-support` branch in `nogueiraanderson/ec2-plugin`)
+   which adds `tryCreateWebIdentityProvider()` using the STS SDK
+2. `ec2-irsa-credential.groovy` persistent script which flips
+   `useInstanceProfileForCredentials=false` after `cloud.groovy` runs
+3. `fix-connection-strategy.groovy` which sets `PRIVATE_IP` connection
+   (required for VPC peering between EKS and Jenkins worker VPCs)
+
+## Costs (per cluster)
 
 | Component | Monthly |
 |-----------|---------|
 | EKS control plane | ~$73 |
 | 1x t3.xlarge node | ~$120 |
 | NAT Gateway | ~$32 |
-| ALB | ~$16 |
-| EBS 100GB gp3 | ~$8 |
-| **Total** | **~$250** |
+| ALB (per instance) | ~$16 |
+| EBS 100GB gp3 (per instance) | ~$8 |
+| **Base** | **~$225** |
+| **Per instance** | **~$24** |
 
-Production could reduce costs with Spot nodes and a shared cluster for multiple Jenkins instances.
-
-## Teardown
-
-```bash
-just clean  # Deletes Jenkins, ALB controller, and EKS cluster
-```
+A shared cluster amortizes the base cost. 10 instances on one cluster:
+~$225 + 10x$24 = ~$465/mo vs 10x$130 = $1,300/mo on EC2 spot.
 
 ## Files
 
 ```
-Dockerfile              # Jenkins 2.528.3 + 153 plugins + 2 Percona forks
-plugins.txt             # Plugin manifest (from live ps57)
-percona-plugins/        # Custom .hpi files (gitignored, download from GH releases)
-eksctl-cluster.yaml     # EKS cluster definition (single node, eu-central-1b)
-cluster-issuer.yaml     # cert-manager ClusterIssuer (DNS-01 via Route53)
-gp3-storageclass.yaml   # EBS CSI gp3 StorageClass
-iam-policy.json         # IRSA policy (EC2 management + Route53)
-jenkins-values.yaml     # Helm values (ALB ingress, ACM TLS, IRSA SA)
-ps57-pv.yaml            # PV/PVC for cloned EBS volume
-groovy/                 # Init scripts (auth, URL, crons, EC2 credential)
-justfile                # All lifecycle recipes
+Dockerfile                           # Jenkins 2.528.3 + 153 plugins + 2 Percona forks
+plugins.txt                          # Plugin manifest
+percona-plugins/                     # Custom .hpi files (gitignored)
+eksctl-cluster.yaml                  # EKS cluster definition
+gp3-storageclass.yaml                # EBS CSI StorageClass
+iam-policy.json                      # IRSA policy (EC2 + Route53)
+groovy/
+  persistent/                        # Mounted via ConfigMap, every startup
+    ec2-irsa-credential.groovy       # IRSA for EC2 plugin
+    fix-connection-strategy.groovy   # PRIVATE_IP for VPC peering
+    fix-url.groovy                   # Set Jenkins URL from env var
+  one-time/                          # Copied on first boot, self-delete
+    fix-auth.groovy                  # Local auth for POC
+    disable-crons.groovy             # Remove cron triggers on clones
+instances/                           # Generated per-instance manifests
+  <name>-pv.yaml                     # PV/PVC
+  <name>-values.yaml                 # Helm values
+justfile                             # All lifecycle recipes
+docs/
+  lessons-learned.md                 # POC findings and gotchas
 ```
