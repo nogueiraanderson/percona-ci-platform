@@ -27,9 +27,19 @@ future Jenkins instances on the cluster.
 running". Compared to 10+ minutes on EC2 (cloud-init + yum install + chown
 100GB + nginx setup + certbot).
 
+**Fresh instance from unified image**: The unified Docker image (249 plugins,
+the union of all 10 instances) provides everything Jenkins needs to boot. A
+fresh PVC with dynamic provisioning (20GB gp3) boots a fully functional Jenkins
+in ~90 seconds. No volume clone needed for new dev/test instances.
+
+**One unified plugin set**: The union of all 10 instances' plugins (249 total)
+doesn't cause conflicts. Some plugins are instance-specific (allure on pmm,
+ansicolor on pxc, etc.) but having extra plugins installed doesn't break
+anything; they're just available if needed.
+
 ## What was painful
 
-### EC2 plugin and IRSA (blocker)
+### EC2 plugin and IRSA (blocker, resolved)
 
 The EC2 plugin (`hudson.plugins.ec2`) with `useInstanceProfileForCredentials=true`
 uses `InstanceProfileCredentialsProvider`, which calls EC2 instance metadata
@@ -45,15 +55,35 @@ IRSA). Instead, the plugin requires a `credentialsId` referencing an
 `NullPointerException: Credentials must not be null` on startup, causing a crash
 loop.
 
-**Workaround options (in order of preference):**
+**Root cause (classloader isolation)**: The EC2 plugin's classloader is separate
+from `aws-java-sdk2-core`. `DefaultCredentialsProvider` (from the core plugin)
+cannot see the STS classes bundled in the EC2 plugin. Adding an STS dependency
+does not help because `DefaultCredentialsProvider` uses its own classloader to
+discover credential providers, and STS is not on that classpath.
 
-1. **Patch the EC2 plugin** to use `DefaultCredentialsProvider` when no
-   credential is specified. We already maintain a fork (`ec2:5.24.percona.2`);
-   this would be a small change in `EC2Cloud.java`
-2. **Create a dedicated IAM user** with access key/secret, store as a Jenkins
-   credential. Works today but requires key rotation
-3. **Attach the policy to the EKS node role**. Quick but breaks pod-level
-   isolation (all pods on the node get EC2 permissions)
+**Fix**: Construct `StsWebIdentityTokenFileCredentialsProvider` explicitly in
+the EC2 plugin code (`EC2Cloud.java`) using the EC2 plugin's own classloader.
+This bypasses the service discovery mechanism that fails due to classloader
+boundaries. The Percona fork (`ec2:5.24.percona.2`) already exists for this.
+
+### cloud.groovy overrides everything on startup
+
+`useInstanceProfileForCredentials` is a final field set during `EC2Cloud`
+construction from `config.xml`. However, `cloud.groovy` (in `init.groovy.d/`)
+recreates the `EC2Cloud` objects on every Jenkins startup, resetting the field
+to whatever is hardcoded in the script.
+
+Editing `config.xml` directly is useless because Jenkins saves its in-memory
+state back to `config.xml` during startup, overwriting any manual edits.
+
+**Fix**: A persistent groovy script that runs AFTER `cloud.groovy` in
+alphabetical order. Since scripts in `init.groovy.d/` execute alphabetically,
+naming the fix script with a prefix like `e-` ensures it runs after `c-`
+(`cloud.groovy`). For example, `e-eks-irsa-credentials.groovy`.
+
+**Lesson**: any configuration that `cloud.groovy` sets will be overwritten on
+every restart. Post-startup fixup scripts must sort alphabetically after
+`cloud.groovy`.
 
 ### OAuth callback mismatch
 
@@ -100,28 +130,95 @@ emulation).
 **Lesson**: always specify `--platform` when the build host and target differ.
 Or use a multi-arch build.
 
+### ConfigMap volumes vs extraVolumes in Helm chart
+
+The Jenkins Helm chart's `customInitContainers` do NOT have access to
+`extraVolumes`. Init containers can only see volumes defined under
+`persistence.volumes`, which are added to the pod spec and visible to all
+containers including init containers.
+
+**Lesson**: when an init container needs to read from a ConfigMap or Secret,
+define the volume under `persistence.volumes`, not `extraVolumes`. The
+`extraVolumes` are only mounted into the main Jenkins container.
+
+### TLS policy on ALB
+
+The default ALB security policy allows TLS 1.0 and TLS 1.1, which are
+deprecated and insecure. Must explicitly set the annotation:
+
+```
+alb.ingress.kubernetes.io/ssl-policy: ELBSecurityPolicy-TLS13-1-2-2021-06
+```
+
+This enforces TLS 1.2 as the minimum with TLS 1.3 support.
+
+**Lesson**: never rely on ALB defaults for TLS. Always set the ssl-policy
+annotation explicitly.
+
+## Infrastructure patterns
+
+### Shared ALB via group.name
+
+Adding `alb.ingress.kubernetes.io/group.name: jenkins-shared` to all ingresses
+consolidates them into one ALB with host-based routing. The ALB Ingress
+Controller creates separate target groups per hostname automatically.
+
+**Cost savings**: ~$16/mo per additional instance (avoiding a dedicated ALB per
+ingress). For 10 instances, that is ~$144/mo saved.
+
+**Lesson**: always use `group.name` when multiple services share the same
+domain and certificate.
+
+### VPC peering vs PUBLIC_DNS for worker connectivity
+
+For the single-region POC, VPC peering between the EKS VPC and EC2 worker VPCs
+works. Jenkins uses the `PRIVATE_IP` connection strategy to reach workers via
+private IPs across peered VPCs.
+
+For multi-region production, public IP SSH (`PUBLIC_DNS` connection strategy)
+eliminates all VPC peering complexity. Workers already have public IPs; Jenkins
+just needs the NAT gateway EIP whitelisted in worker security groups.
+
+**Recommendation**: use `PUBLIC_DNS` for production. VPC peering across regions
+adds complexity (transit gateways, route tables, cross-region costs) that is not
+justified when workers already expose public IPs.
+
+### All changes must be in code
+
+Manual `kubectl annotate`, `kubectl patch`, or Script Console commands create
+drift between the git repo and the live cluster. Everything must go through
+values files, Helm upgrades, and git commits.
+
+The `justfile` is the CLI interface for all operations. Git is the source of
+truth. If a change cannot be expressed in a values file or Helm template, it
+should be a persistent groovy script or a Dockerfile change, not a manual
+command.
+
 ## Production rollout considerations
 
 ### Per-instance migration
 
 Each Jenkins instance needs:
 - Its own `jenkins-values.yaml` (hostname, JVM opts, executor count)
-- Its own EBS volume clone (snapshot + PVC)
+- Its own EBS volume clone (snapshot + PVC), or a fresh PVC if starting clean
 - OAuth callback URLs updated before DNS cutover
 - Audit of `init.groovy.d/` scripts for environment-specific assumptions
+- Post-`cloud.groovy` fixup script if IRSA credentials are needed
 
 ### EC2 plugin fix (prerequisite)
 
 All 10 instances use EC2 workers. The IRSA credential gap must be resolved
-before any production migration. Recommended: patch the Percona EC2 plugin fork
-to support `DefaultCredentialsProvider`.
+before any production migration. The fix is to patch the Percona EC2 plugin fork
+to construct `StsWebIdentityTokenFileCredentialsProvider` explicitly, bypassing
+the classloader isolation issue with `DefaultCredentialsProvider`.
 
 ### Shared vs dedicated clusters
 
 The POC uses a dedicated single-node cluster ($250/mo). For production:
 - **Shared cluster**: all 10 Jenkins masters on one EKS cluster. EKS control
   plane cost ($73/mo) is amortized. Node group scales based on total resource
-  demand. Risk: blast radius (cluster issue affects all instances)
+  demand. Use shared ALB via `group.name` to save ~$144/mo. Risk: blast radius
+  (cluster issue affects all instances)
 - **Dedicated clusters**: one cluster per instance. Higher cost ($73/mo each)
   but full isolation. Same as current EC2 model
 
