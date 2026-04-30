@@ -1,0 +1,9 @@
+apiVersion: v2
+name: external-secrets
+version: 0.1.0
+description: External Secrets Operator — sync from AWS Secrets Manager into K8s Secrets.
+type: application
+dependencies:
+  - name: external-secrets
+    version: 0.20.x
+    repository: https://charts.external-secrets.io

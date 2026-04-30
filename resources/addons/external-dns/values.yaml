@@ -1,0 +1,12 @@
+external-dns:
+  provider: aws
+  domainFilters:
+    - cd.percona.com
+  policy: sync
+  txtOwnerId: percona-ci-platform
+  serviceAccount:
+    create: true
+    name: external-dns
+  sources:
+    - service
+    - ingress

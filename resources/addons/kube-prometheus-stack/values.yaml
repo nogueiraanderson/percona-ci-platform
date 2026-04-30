@@ -1,0 +1,85 @@
+kube-prometheus-stack:
+  crds:
+    enabled: true
+
+  prometheus:
+    prometheusSpec:
+      retention: 30d
+      retentionSize: 90GiB
+      nodeSelector:
+        workload: prometheus
+      tolerations:
+        - key: workload
+          operator: Equal
+          value: prometheus
+          effect: NoSchedule
+      storageSpec:
+        volumeClaimTemplate:
+          spec:
+            storageClassName: gp3-monitoring-1a-retain
+            accessModes: [ReadWriteOnce]
+            resources:
+              requests:
+                storage: 100Gi
+      serviceMonitorSelectorNilUsesHelmValues: false
+      podMonitorSelectorNilUsesHelmValues: false
+      ruleSelectorNilUsesHelmValues: false
+
+  alertmanager:
+    alertmanagerSpec:
+      nodeSelector:
+        workload: prometheus
+      tolerations:
+        - key: workload
+          operator: Equal
+          value: prometheus
+          effect: NoSchedule
+      storage:
+        volumeClaimTemplate:
+          spec:
+            storageClassName: gp3-monitoring-1a-retain
+            accessModes: [ReadWriteOnce]
+            resources:
+              requests:
+                storage: 10Gi
+
+  grafana:
+    enabled: true
+    defaultDashboardsEnabled: true
+    persistence:
+      enabled: true
+      storageClassName: gp3-monitoring-1a-retain
+      size: 10Gi
+    nodeSelector:
+      workload: prometheus
+    tolerations:
+      - key: workload
+        operator: Equal
+        value: prometheus
+        effect: NoSchedule
+    ingress:
+      enabled: true
+      ingressClassName: alb
+      annotations:
+        alb.ingress.kubernetes.io/group.name: jenkins-cd
+        alb.ingress.kubernetes.io/scheme: internet-facing
+        alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
+        alb.ingress.kubernetes.io/ssl-redirect: '443'
+        alb.ingress.kubernetes.io/ssl-policy: ELBSecurityPolicy-TLS13-1-2-2021-06
+      hosts: [grafana.cd.percona.com]
+
+  prometheusOperator:
+    nodeSelector:
+      node-role: system
+    admissionWebhooks:
+      patch:
+        nodeSelector:
+          node-role: system
+
+  prometheus-node-exporter:
+    tolerations:
+      - operator: Exists
+
+  kube-state-metrics:
+    nodeSelector:
+      node-role: system

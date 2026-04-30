@@ -1,0 +1,9 @@
+apiVersion: v2
+name: karpenter
+version: 0.1.0
+description: Umbrella chart for Karpenter (controller + NodePools + EC2NodeClass).
+type: application
+dependencies:
+  - name: karpenter
+    version: 1.12.0
+    repository: oci://public.ecr.aws/karpenter

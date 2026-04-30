@@ -1,0 +1,10 @@
+aws-load-balancer-controller:
+  clusterName: percona-ci-platform   # ApplicationSet rewrites via cluster-secret annotation
+  serviceAccount:
+    create: true
+    name: aws-load-balancer-controller
+  region: us-east-1
+  enableServiceMutatorWebhook: false
+  defaultTags:
+    managed-by: argocd
+    repo: github.com/nogueiraanderson/percona-ci-platform
