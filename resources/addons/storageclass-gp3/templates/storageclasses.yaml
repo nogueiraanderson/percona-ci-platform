@@ -1,4 +1,7 @@
 # Default class — multi-AZ, gp3, Delete on PVC delete.
+# tagSpecification_* propagates tags onto the AWS EBS volume — required so the
+# percona-dev-admin volume-cleanup Lambda doesn't reap "available" volumes
+# (it checks for the PerconaKeep tag). iit-billing-tag handles billing rollup.
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
@@ -13,6 +16,9 @@ parameters:
   encrypted: "true"
   iops: "3000"
   throughput: "125"
+  tagSpecification_1: "iit-billing-tag=percona-ci-platform"
+  tagSpecification_2: "PerconaKeep=True"
+  tagSpecification_3: "managed-by=ebs-csi-driver"
 allowVolumeExpansion: true
 ---
 # Monitoring class — single-AZ (us-east-1a), Retain. Used by Prometheus / Alertmanager / Grafana.
@@ -32,6 +38,10 @@ parameters:
   encrypted: "true"
   iops: "3000"
   throughput: "125"
+  tagSpecification_1: "iit-billing-tag=percona-ci-platform"
+  tagSpecification_2: "PerconaKeep=True"
+  tagSpecification_3: "managed-by=ebs-csi-driver"
+  tagSpecification_4: "workload=prometheus"
 allowVolumeExpansion: true
 ---
 # Jenkins-master class — single-AZ (us-east-1a), Retain. Used by Jenkins StatefulSets.
@@ -51,4 +61,8 @@ parameters:
   encrypted: "true"
   iops: "3000"
   throughput: "125"
+  tagSpecification_1: "iit-billing-tag=percona-ci-platform"
+  tagSpecification_2: "PerconaKeep=True"
+  tagSpecification_3: "managed-by=ebs-csi-driver"
+  tagSpecification_4: "workload=jenkins"
 allowVolumeExpansion: true

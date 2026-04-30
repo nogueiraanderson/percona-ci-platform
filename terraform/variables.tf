@@ -105,10 +105,23 @@ variable "jenkins_hosts" {
 }
 
 variable "tags" {
-  description = "Default tags for every taggable AWS resource."
+  description = <<-EOT
+    Default tags for every taggable AWS resource. Two of these are required by
+    the percona-dev-admin account's cleanup automation — do not drop them:
+
+    - `iit-billing-tag` — IaC/LambdaEC2Cleanup.yml terminates EC2 instances
+      missing this tag (any value) after 10 minutes.
+    - `PerconaKeep` — IaC/LambdaVolumeCleanup.yml deletes any `available`
+      EBS volume daily unless this tag is present (capital P, capital K).
+
+    EBS volumes provisioned by the in-cluster aws-ebs-csi-driver pick up
+    these tags via StorageClass `parameters.tagSpecification_*` (see
+    resources/addons/storageclass-gp3/templates/storageclasses.yaml).
+  EOT
   type        = map(string)
   default = {
     "iit-billing-tag" = "percona-ci-platform"
+    "PerconaKeep"     = "True"
     "managed-by"      = "opentofu"
     "repo"            = "github.com/nogueiraanderson/percona-ci-platform"
   }
