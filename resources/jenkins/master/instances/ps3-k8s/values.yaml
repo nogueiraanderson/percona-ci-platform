@@ -1,0 +1,32 @@
+# ps3-k8s.cd.percona.com — first Jenkins master to run in-cluster.
+#
+# Seeded as a full replica of the production EC2 ps3 master: JENKINS_HOME
+# is restored from a cross-region EBS snapshot copy (see
+# runbooks/migrate-ps3-to-eks.md), so jobs / plugins / credentials / build
+# history come up identical on first boot.
+#
+# Production ps3.cd.percona.com stays on its current EC2 path during
+# validation. Cutover is a DNS flip of ps3.cd.percona.com → ps3-k8s once
+# the in-cluster replica is trusted.
+host: ps3-k8s.cd.percona.com
+mode: in-cluster
+
+storage:
+  storageClassName: gp3-jenkins-1a-retain
+  size: 100Gi
+  # Set after the cross-region EBS snapshot copy lands in us-east-1a;
+  # pre-binds the PVC to the copied volume. Leave commented for fresh PVC.
+  # preExistingVolumeID: vol-xxxxxxxxxxxxxxxxx
+
+nodeAffinity:
+  workload: jenkins
+  zone: us-east-1a
+
+resources:
+  requests: { cpu: "1", memory: "4Gi" }
+  limits: { cpu: "4", memory: "12Gi" }
+
+ingress:
+  enabled: true
+  group: jenkins-cd
+  sslPolicy: ELBSecurityPolicy-TLS13-1-2-2021-06

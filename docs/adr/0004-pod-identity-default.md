@@ -37,5 +37,6 @@ service-accounts-eks` for edge cases (legacy SDK quirks).
   `terraform/pod-identity.tf` instead of an IRSA role + OIDC trust patch.
 - The Jenkins EC2 plugin's classloader-isolated SDK v1 has historically
   intercepted IRSA's web-identity provider; behaviour under Pod Identity is
-  **unverified** and must be tested on the ps3 PoC before committing the master
-  workload to it. See `docs/lessons-from-poc.md`.
+  **unverified** and must be tested on `ps3-k8s` (the first in-cluster
+  master) before committing the rest of the fleet's lift to it. See
+  `docs/lessons-from-poc.md`.

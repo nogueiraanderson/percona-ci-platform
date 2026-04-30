@@ -73,12 +73,10 @@ variable "jenkins_hosts" {
     storage_size_gib = optional(number)
   }))
   default = {
-    ps3 = {
-      mode             = "in-cluster"
-      upstream_origin  = "origin-ps3.cd.percona.com"
-      upstream_az      = "us-east-1a"
-      storage_size_gib = 100
-    }
+    # 9 EC2 masters → Mode B (ALB → in-cluster NGINX → EC2 origin). The
+    # friendly `<host>.cd.percona.com` flips from EC2 to the ALB;
+    # `origin-<host>.cd.percona.com` keeps pointing at the EC2 master so
+    # the proxy upstream stays reachable through cutover.
     pmm   = { mode = "proxy", upstream_origin = "origin-pmm.cd.percona.com" }
     ps80  = { mode = "proxy", upstream_origin = "origin-ps80.cd.percona.com" }
     pxc   = { mode = "proxy", upstream_origin = "origin-pxc.cd.percona.com" }
@@ -88,6 +86,21 @@ variable "jenkins_hosts" {
     ps57  = { mode = "proxy", upstream_origin = "origin-ps57.cd.percona.com" }
     rel   = { mode = "proxy", upstream_origin = "origin-rel.cd.percona.com" }
     cloud = { mode = "proxy", upstream_origin = "origin-cloud.cd.percona.com" }
+
+    # ps3-k8s = first in-cluster Jenkins master. Seeded as a full replica of
+    # the production EC2 ps3 via cross-region EBS snapshot copy of
+    # JENKINS_HOME (see runbooks/migrate-ps3-to-eks.md). Runs in parallel
+    # with EC2 ps3 for validation; cutover is a DNS flip of
+    # ps3.cd.percona.com to this host.
+    #
+    # Production ps3.cd.percona.com is intentionally NOT in this map — it
+    # stays on its current EC2 path, fully outside platform scope, until the
+    # cutover. Add a `ps3` entry here only when the EC2 master is retired.
+    "ps3-k8s" = {
+      mode             = "in-cluster"
+      upstream_az      = "us-east-1a"
+      storage_size_gib = 100
+    }
   }
 }
 

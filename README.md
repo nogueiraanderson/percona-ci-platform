@@ -2,8 +2,9 @@
 
 Public OpenTofu + ArgoCD platform repo that provisions an EKS cluster in
 `us-east-1` and bootstraps it via GitOps. Initial workload: terminate SSL
-for `*.cd.percona.com` on a single shared ALB and run / reverse-proxy the
-ten Percona Jenkins masters (`ps3` first, others on cadence).
+for `*.cd.percona.com` on a single shared ALB, reverse-proxy the existing
+EC2 Jenkins masters, and run the first in-cluster replica
+(`ps3-k8s.cd.percona.com`, seeded from production ps3) alongside them.
 
 The repo lives initially under `nogueiraanderson` and will move to
 `Percona-Lab/` once it's stable.

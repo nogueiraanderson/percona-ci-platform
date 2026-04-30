@@ -21,6 +21,15 @@
                                           EC2 Jenkins master (other region)
 ```
 
+## Day-one host scope
+
+| Host(s) | Role | Why |
+|---|---|---|
+| `ps3-k8s.cd.percona.com` | Mode A (in-cluster StatefulSet) | First in-cluster Jenkins master. Seeded as a full replica of the production EC2 ps3 (cross-region EBS snapshot copy of `JENKINS_HOME`). See `runbooks/migrate-ps3-to-eks.md`. |
+| `pmm`, `ps80`, `pxc`, `pxb`, `psmdb`, `pg`, `ps57`, `rel`, `cloud` (`.cd.percona.com`) | Mode B (ALB → in-cluster NGINX → EC2 origin) | Friendly DNS flips to ALB, traffic still ends up at the existing EC2 master via `origin-<host>.cd.percona.com`. |
+| `ps3.cd.percona.com` | **Untouched** — stays on its current direct EC2 path | Production traffic keeps flowing during validation of `ps3-k8s`. Cutover happens later as a Route 53 flip; until then, ps3 is intentionally outside this platform's `var.jenkins_hosts` map. |
+| `grafana.cd.percona.com`, `argocd.cd.percona.com` | In-cluster Service behind the same ALB | Platform-managed UIs. |
+
 ## Ownership boundary
 
 - **Terraform / OpenTofu** owns AWS-side state up to "ArgoCD healthy."
