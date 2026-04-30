@@ -1,0 +1,10 @@
+rules:
+  unpinned-uses:
+    config:
+      policies:
+        # Trusted org actions: allow tag-pin (e.g. @v4) instead of SHA-pin.
+        actions/*: ref-pin
+        opentofu/*: ref-pin
+        terraform-linters/*: ref-pin
+        aquasecurity/*: ref-pin
+        woodruffw/*: ref-pin

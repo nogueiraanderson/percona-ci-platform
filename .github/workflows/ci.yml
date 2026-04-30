@@ -1,0 +1,103 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  actionlint:
+    name: actionlint + zizmor
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: actionlint
+        uses: docker://rhysd/actionlint:1.7.12
+        with:
+          args: -color
+      - name: zizmor
+        uses: woodruffw/zizmor-action@v1
+        with:
+          inputs: .github/workflows/
+
+  terraform:
+    name: tofu fmt + validate + tflint + trivy
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: 1.11.6
+
+      - name: tofu fmt -check
+        run: tofu fmt -recursive -check -diff
+
+      - name: tofu init -backend=false
+        working-directory: terraform
+        run: tofu init -backend=false
+
+      - name: tofu validate
+        working-directory: terraform
+        run: tofu validate
+
+      - uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: v0.62.0
+
+      - name: tflint
+        working-directory: terraform
+        run: |
+          tflint --init
+          tflint --recursive --format compact
+
+      - uses: aquasecurity/trivy-action@0.27.0
+        with:
+          scan-type: config
+          scan-ref: terraform/
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+
+  yaml:
+    name: yamllint + kubeconform
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: pip install yamllint
+        run: pip install yamllint==1.38.0
+
+      - name: yamllint
+        run: yamllint -s argocd-bootstrap/ resources/ .github/
+
+      - name: install kubeconform
+        run: |
+          curl -sSL -o kubeconform.tgz \
+            https://github.com/yannh/kubeconform/releases/download/v0.7.0/kubeconform-linux-amd64.tar.gz
+          tar -xzf kubeconform.tgz kubeconform
+          sudo mv kubeconform /usr/local/bin/
+
+      - name: kubeconform
+        run: |
+          kubeconform -strict -summary -ignore-missing-schemas \
+            -ignore-filename-pattern '(Chart|values.*)\.yaml' \
+            -schema-location default \
+            -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+            argocd-bootstrap/ resources/
