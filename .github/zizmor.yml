@@ -7,4 +7,4 @@ rules:
         opentofu/*: ref-pin
         terraform-linters/*: ref-pin
         aquasecurity/*: ref-pin
-        woodruffw/*: ref-pin
+        zizmorcore/*: ref-pin

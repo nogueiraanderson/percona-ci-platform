@@ -25,7 +25,7 @@ jobs:
         with:
           args: -color
       - name: zizmor
-        uses: woodruffw/zizmor-action@v1
+        uses: zizmorcore/zizmor-action@v0.5.3
         with:
           inputs: .github/workflows/
 
@@ -62,7 +62,7 @@ jobs:
           tflint --init
           tflint --recursive --format compact
 
-      - uses: aquasecurity/trivy-action@0.27.0
+      - uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: config
           scan-ref: terraform/
