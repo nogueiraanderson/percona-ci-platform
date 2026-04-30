@@ -1,2 +1,53 @@
-# Don't commit plugin binaries
-percona-plugins/*.hpi
+# Jenkins plugin binaries (downloaded from GH releases at image-build time)
+image/percona-plugins/*.hpi
+
+# Terraform / OpenTofu
+.terraform/
+.terraform.lock.hcl.bak
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Local-only tfvars (per-developer overrides like aws_profile)
+*.auto.tfvars
+!*.auto.tfvars.example
+backend.hcl
+
+# tflint cache
+.tflint.d/
+
+# Local-only dotfiles
+.envrc
+.direnv/
+.env
+.env.*
+!.env.example
+
+# Secrets that should never land in git
+*.pem
+*.key
+secrets/
+*.kubeconfig
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Tooling caches
+.pre-commit-cache/
+.tflint-cache/
+.cache/
+node_modules/
+
+# Local kubectl context dumps
+kubeconfig-*.yaml

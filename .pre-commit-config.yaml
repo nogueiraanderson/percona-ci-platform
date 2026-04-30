@@ -1,0 +1,51 @@
+# Mirror of `just ci`. Local hooks must stay in sync with .github/workflows/ci.yml.
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+        args: [--allow-multiple-documents]
+      - id: check-added-large-files
+        args: [--maxkb=500]
+      - id: detect-private-key
+      - id: mixed-line-ending
+        args: [--fix=lf]
+
+  - repo: https://github.com/antonbabenko/pre-commit-terraform
+    rev: v1.92.1
+    hooks:
+      - id: terraform_fmt
+      - id: terraform_validate
+        args: [--hook-config=--retry-once-with-cleanup=true]
+
+  - repo: https://github.com/terraform-linters/tflint
+    rev: v0.62.0
+    hooks:
+      - id: tflint
+        args: [--recursive]
+
+  - repo: https://github.com/aquasecurity/trivy
+    rev: v0.70.0
+    hooks:
+      - id: trivy-config
+        args: [--severity, "HIGH,CRITICAL", terraform/]
+
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.38.0
+    hooks:
+      - id: yamllint
+        args: [-c, .yamllint.yaml]
+        files: ^(argocd-bootstrap|resources|\.github)/.*\.ya?ml$
+
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.12
+    hooks:
+      - id: actionlint
+
+  - repo: https://github.com/woodruffw/zizmor
+    rev: v1.24.1
+    hooks:
+      - id: zizmor
+        args: [--quiet]
