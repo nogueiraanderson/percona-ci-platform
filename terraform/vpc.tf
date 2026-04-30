@@ -2,6 +2,11 @@
 # Subnets carry the EKS LB-controller tags (kubernetes.io/role/elb, internal-elb).
 #
 # TODO: implement on first apply pass. Skeleton below; uncomment and review before enabling.
+#
+# Hardening (see docs/eks-hardening.md):
+#  11. enable_s3_endpoint = true (free gateway endpoint, drops NAT-GW egress for ECR-pull
+#      object reads + Helm chart downloads). Interface endpoints (ECR / STS / Secrets
+#      Manager) are paid; revisit when NAT-GW bill warrants.
 
 # module "vpc" {
 #   source  = local.modules.vpc.source

@@ -28,6 +28,7 @@ Verify with `scripts/check_versions.py` before any pin bump.
 3. **Pod Identity needs the agent.** `eks-pod-identity-agent` managed addon is mandatory; without it every association silently no-ops.
 4. **EC2-plugin IRSA classloader bug.** Jenkins EC2 plugin (AWS SDK v1) has classloader isolation that breaks `DefaultCredentialsProvider`. Patched fork `ec2:5.24.percona.2` + `e-ec2-irsa-credential.groovy` are the only working path. Pod Identity *should* fix it transparently — verify on `ps3-k8s` (the first in-cluster master) before claiming so.
 5. **Karpenter taint exclusion.** Stateful NGs (`prometheus-system`, `jenkins-system`) carry `workload=<x>:NoSchedule`. Default Karpenter NodePool must `NotIn` that taint.
+6. **EKS hardening checklist.** Before uncommenting `terraform/eks.tf` / `eks-addons.tf` modules, work through `docs/eks-hardening.md` (Top-5: access entries with `authenticationMode=API`, `publicAccessCidrs` allowlist, control-plane logging, VPC CNI prefix delegation, addon-version pinning).
 
 ## Related repos
 

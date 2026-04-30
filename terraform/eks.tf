@@ -2,6 +2,13 @@
 # Karpenter handles workload nodes; managed NGs host stateful + bootstrap pods only.
 #
 # TODO: enable after vpc.tf. Skeleton below.
+#
+# Hardening (must land before merging modules — see docs/eks-hardening.md):
+#   1. authentication_mode = "API"; bootstrap_cluster_creator_admin_permissions = false
+#   2. cluster_endpoint_public_access_cidrs = [<allowlist>] — no public-unrestricted
+#   3. cluster_enabled_log_types = ["audit", "authenticator", "api"]
+#   9. encryption_config (customer-managed KMS CMK) for cluster secrets
+#  10. metadata_options { http_tokens = "required", http_put_response_hop_limit = 1 }
 
 # module "eks" {
 #   source  = local.modules.eks.source
@@ -16,8 +23,9 @@
 #   vpc_id     = module.vpc.vpc_id
 #   subnet_ids = module.vpc.private_subnets
 #
-#   # Cluster admin via current AWS principal — keep the bootstrap convenient.
-#   enable_cluster_creator_admin_permissions = true
+#   # docs/eks-hardening.md #1 — flip both to API + false before any human gets a kubeconfig.
+#   authentication_mode                      = "API_AND_CONFIG_MAP" # → "API" once access entries are written
+#   enable_cluster_creator_admin_permissions = true                 # → false
 #
 #   eks_managed_node_groups = {
 #     system = {
