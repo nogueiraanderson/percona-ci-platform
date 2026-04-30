@@ -1,0 +1,14 @@
+# Local-only overrides for OpenTofu. Copy to local.auto.tfvars (gitignored)
+# and edit. Anything you put here lands in tofu plan automatically.
+#
+# `cp local.auto.tfvars.example local.auto.tfvars`
+
+# AWS named profile (must exist in ~/.aws/config). Leave commented to use the
+# SDK default chain (AWS_PROFILE env var, SSO, instance profile, etc.).
+#aws_profile = "your-profile-name-here"
+
+# Override only if you want a different region or hostname for a fork/dev cluster.
+#aws_region        = "us-east-1"
+#cluster_name      = "percona-ci-platform"
+#argocd_hostname   = "argocd.cd.percona.com"
+#grafana_hostname  = "grafana.cd.percona.com"

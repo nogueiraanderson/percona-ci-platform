@@ -1,0 +1,11 @@
+external-secrets:
+  serviceAccount:
+    create: true
+    name: external-secrets
+  installCRDs: true
+  webhook:
+    nodeSelector:
+      node-role: system
+  certController:
+    nodeSelector:
+      node-role: system

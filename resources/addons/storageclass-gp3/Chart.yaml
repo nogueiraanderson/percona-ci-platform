@@ -1,0 +1,5 @@
+apiVersion: v2
+name: storageclass-gp3
+version: 0.1.0
+description: Two gp3 StorageClasses — multi-AZ default and AZ-pinned monitoring/Jenkins variants.
+type: application

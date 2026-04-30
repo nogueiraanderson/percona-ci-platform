@@ -1,0 +1,14 @@
+karpenter:
+  settings:
+    clusterName: percona-ci-platform
+    interruptionQueue: percona-ci-platform   # rewritten via ApplicationSet
+  serviceAccount:
+    create: true
+    name: karpenter
+  replicas: 2
+  controller:
+    resources:
+      requests: { cpu: "200m", memory: "512Mi" }
+      limits: { cpu: "1", memory: "1Gi" }
+  nodeSelector:
+    node-role: system
