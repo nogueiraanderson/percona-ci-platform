@@ -1,0 +1,27 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: platform
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  description: Platform addons + Jenkins masters for percona-ci-platform.
+  sourceRepos:
+    - https://github.com/nogueiraanderson/percona-ci-platform
+    - https://github.com/Percona-Lab/percona-ci-platform
+    - https://argoproj.github.io/argo-helm
+    - https://aws.github.io/eks-charts
+    - https://kubernetes-sigs.github.io/external-dns/
+    - https://prometheus-community.github.io/helm-charts
+    - https://charts.external-secrets.io
+    - oci://public.ecr.aws/karpenter
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: '*'
+  clusterResourceWhitelist:
+    - group: '*'
+      kind: '*'
+  namespaceResourceWhitelist:
+    - group: '*'
+      kind: '*'

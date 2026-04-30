@@ -1,0 +1,50 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: addons
+  namespace: argocd
+spec:
+  generators:
+    - matrix:
+        generators:
+          - clusters:
+              selector:
+                matchLabels:
+                  enabled: 'true'
+          - git:
+              repoURL: https://github.com/nogueiraanderson/percona-ci-platform
+              revision: HEAD
+              directories:
+                - path: resources/addons/*
+  template:
+    metadata:
+      name: '{{ path.basename }}'
+    spec:
+      project: platform
+      source:
+        repoURL: https://github.com/nogueiraanderson/percona-ci-platform
+        targetRevision: HEAD
+        path: '{{ path }}'
+        helm:
+          valueFiles: [values.yaml]
+          valuesObject:
+            aws:
+              region: '{{ metadata.annotations.aws_region }}'
+              accountId: '{{ metadata.annotations.aws_account_id }}'
+              clusterName: '{{ metadata.annotations.cluster_name }}'
+              albCertificateArn: '{{ metadata.annotations.acm_wildcard_arn }}'
+              albControllerRoleArn: '{{ metadata.annotations.alb_controller_role_arn }}'
+              externalDnsRoleArn: '{{ metadata.annotations.external_dns_role_arn }}'
+              ebsCsiRoleArn: '{{ metadata.annotations.ebs_csi_role_arn }}'
+              externalSecretsRoleArn: '{{ metadata.annotations.external_secrets_role_arn }}'
+              karpenterQueue: '{{ metadata.annotations.karpenter_sqs_name }}'
+      destination:
+        server: '{{ server }}'
+        namespace: '{{ path.basename }}'
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+          - ServerSideApply=true
