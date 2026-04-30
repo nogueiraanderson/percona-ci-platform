@@ -31,7 +31,7 @@ jobs:
         run: zizmor --quiet .github/workflows/
 
   terraform:
-    name: tofu fmt + validate + tflint + trivy
+    name: tofu fmt + validate + trivy
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -53,15 +53,11 @@ jobs:
         working-directory: terraform
         run: tofu validate
 
-      - uses: terraform-linters/setup-tflint@v4
-        with:
-          tflint_version: v0.62.0
-
-      - name: tflint
-        working-directory: terraform
-        run: |
-          tflint --init
-          tflint --recursive --format compact
+      # tflint is intentionally not run — its terraform plugin (v0.14.x bundled
+      # with tflint 0.62.0) doesn't understand OpenTofu 1.8+ early-eval syntax
+      # (`module.source = local.modules.<name>.source`), which we use as the
+      # single source of truth for module pins (versions.tf, decision D11).
+      # Re-enable when the ruleset adds early-eval support.
 
       - uses: aquasecurity/trivy-action@v0.36.0
         with:
