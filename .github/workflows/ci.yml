@@ -65,6 +65,11 @@ jobs:
           scan-ref: terraform/
           severity: HIGH,CRITICAL
           exit-code: '1'
+          # `.terraform/` is the vendored module cache populated by `tofu init`
+          # above; skip it so we only scan our own .tf, not the modules' internals.
+          skip-dirs: terraform/.terraform
+          # Per-rule allowlist with rationale; see .trivyignore for entries.
+          trivyignores: .trivyignore
 
   yaml:
     name: yamllint + kubeconform

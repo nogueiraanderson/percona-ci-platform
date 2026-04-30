@@ -51,7 +51,9 @@ tf-validate: tf-init
 #    cd terraform && tflint --init && tflint --recursive --format compact
 
 tf-trivy:
-    trivy config --quiet --severity HIGH,CRITICAL terraform/
+    trivy config --quiet --severity HIGH,CRITICAL --exit-code 1 \
+      --skip-dirs terraform/.terraform \
+      --ignorefile .trivyignore terraform/
 
 tf-plan:
     cd terraform && tofu plan -out=tfplan
